@@ -303,6 +303,12 @@ def main():
             
     log_steps = 0
     running_loss = 0.0
+    running_mse = 0.0
+    running_rmse = 0.0
+    running_grad_norm = 0.0
+    running_clipped = 0
+    running_optimization_steps = 0
+
     start_time = time()
     use_guidance = guidance_scale > 1.0
     zs = torch.randn(micro_batch_size, *latent_size, device=device, dtype=torch.float32) # always use float for noise sampling
@@ -398,16 +404,24 @@ def main():
             optimizer.zero_grad(set_to_none=True)
             model_kwargs = dict(y=labels)
             with autocast(**autocast_kwargs):
-                loss = transport.training_losses(ddp_model, z, model_kwargs)["loss"].mean()
+                loss_terms = transport.training_losses(ddp_model, z, model_kwargs)
+                loss = loss_terms["loss"].mean()
             loss.float()
             if scaler:
                 scaler.scale(loss / grad_accum_steps).backward()
             else:
                 (loss / grad_accum_steps).backward()
+
+            gradient_clipped = False
+            grad_norm = 0.0
             if clip_grad:
                 if scaler:
-                    scaler.unscale_(optimizer) 
-                torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), clip_grad)
+                    scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    ddp_model.parameters(),
+                    clip_grad,
+                )
+                gradient_clipped = bool(grad_norm > clip_grad)
             if global_step % grad_accum_steps == 0:
                 if scaler:
                     scaler.step(optimizer)
@@ -417,16 +431,34 @@ def main():
                 if scheduler is not None:
                     scheduler.step()
                 update_ema(ema_model, ddp_model.module, decay=ema_decay)
+
             running_loss += loss.item()
+            running_mse += loss_terms["mse"].item()
+            running_rmse += loss_terms["rmse"].item()
+            running_grad_norm += float(grad_norm)
+            running_clipped += int(gradient_clipped)
+            running_optimization_steps += 1
             epoch_metrics['loss'] += loss.detach()
             
             if log_interval > 0 and global_step % log_interval == 0 and rank == 0:
-                avg_loss = running_loss / log_interval # flow loss often has large variance so we record avg loss
                 steps = torch.tensor(log_interval, device=device)
                 stats = {
-                    "train/loss": avg_loss,
+                    "train/loss": running_loss / log_interval,
+                    # flow loss often has large variance so we record avg loss
+                    "train/mse": running_mse / log_interval,
+                    "train/rmse": running_rmse / log_interval,
                     "train/lr": optimizer.param_groups[0]["lr"],
                 }
+                stats.update({
+                    "optimization/gradient_norm":
+                        running_grad_norm / max(running_optimization_steps, 1),
+
+                    "optimization/gradient_clipped":
+                        bool(running_clipped > 0),
+
+                    "optimization/clipping_rate":
+                        running_clipped / max(running_optimization_steps, 1),
+                })
                 logger.info(
                     f"[Epoch {epoch} | Step {global_step}] "
                     + ", ".join(f"{k}: {v:.4f}" for k, v in stats.items())
@@ -437,6 +469,11 @@ def main():
                         step=global_step,
                     )
                 running_loss = 0.0
+                running_mse = 0.0
+                running_rmse = 0.0
+                running_grad_norm = 0.0
+                running_clipped = 0
+                running_optimization_steps = 0
             if global_step % sample_every == 0:
                 model.eval()
                 logger.info("Generating EMA samples...")

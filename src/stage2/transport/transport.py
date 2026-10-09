@@ -211,15 +211,22 @@ class Transport:
             #terms['loss'] = mean_flat(((model_output - ut) ** 2))
             error = model_output - ut
 
+            # Diagnostic metrics
+            terms["mse"] = error.square().mean().detach()
+
+            sample_mse = (
+                error.flatten(start_dim=1)
+                .square()
+                .mean(dim=1)
+            )
+
+            terms["rmse"] = sample_mse.sqrt().mean().detach()
+
+            # Selected training objective
             if self.velocity_loss_type == "squared_l2":
                 terms["loss"] = error.square().mean()
 
             elif self.velocity_loss_type == "unsquared_l2":
-                sample_mse = (
-                    error.flatten(start_dim=1)
-                    .square()
-                    .mean(dim=1)
-                )
                 terms["loss"] = sample_mse.sqrt().mean()
 
             else:
