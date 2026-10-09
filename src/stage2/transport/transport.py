@@ -95,6 +95,7 @@ class Transport:
         time_dist_shift,
         train_eps,
         sample_eps,
+        velocity_loss_type="squared_l2"
     ):
         path_options = {
             PathType.LINEAR: path.ICPlan,
@@ -103,6 +104,7 @@ class Transport:
         }
 
         self.loss_type = loss_type
+        self.velocity_loss_type = velocity_loss_type
         self.model_type = model_type
         self.time_dist_type = time_dist_type
         self.time_dist_shift = time_dist_shift
@@ -206,7 +208,25 @@ class Transport:
         terms = {}
         terms['pred'] = model_output
         if self.model_type == ModelType.VELOCITY:
-            terms['loss'] = mean_flat(((model_output - ut) ** 2))
+            #terms['loss'] = mean_flat(((model_output - ut) ** 2))
+            error = model_output - ut
+
+            if self.velocity_loss_type == "squared_l2":
+                terms["loss"] = error.square().mean()
+
+            elif self.velocity_loss_type == "unsquared_l2":
+                sample_mse = (
+                    error.flatten(start_dim=1)
+                    .square()
+                    .mean(dim=1)
+                )
+                terms["loss"] = sample_mse.sqrt().mean()
+
+            else:
+                raise ValueError(
+                    f"Unknown velocity loss type: "
+                    f"{self.velocity_loss_type!r}"
+                )
         else: 
             _, drift_var = self.path_sampler.compute_drift(xt, t)
             sigma_t, _ = self.path_sampler.compute_sigma_t(path.expand_t_like_x(t, xt))

@@ -8,6 +8,7 @@ def create_transport(
     sample_eps=None,
     time_dist_type="uniform",
     time_dist_shift=1.0,
+    velocity_loss_type="squared_l2",
 ):
     """function for creating Transport object
     **Note**: model prediction defaults to velocity
@@ -64,6 +65,7 @@ def create_transport(
         time_dist_shift=time_dist_shift,
         train_eps=train_eps,
         sample_eps=sample_eps,
+        velocity_loss_type=velocity_loss_type,
     )
     
     return state
