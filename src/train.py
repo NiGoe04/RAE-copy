@@ -478,9 +478,10 @@ def main():
                 model.eval()
                 logger.info("Generating EMA samples...")
                 with torch.no_grad():
-                    zs_samples = zs[:8] # at most 8 samples
+                    n_visual = min(64, zs.shape[0], labels.shape[0]) # at most 64 samples
+                    zs_samples = zs[:n_visual]
                     visual_sample_model_kwargs = deepcopy(sample_model_kwargs)
-                    visual_sample_model_kwargs['y'] = labels[:8] 
+                    visual_sample_model_kwargs['y'] = labels[:n_visual]
                     with autocast(**autocast_kwargs):
                         samples = eval_sampler(zs_samples, ema_model_fn, **visual_sample_model_kwargs)[-1]
                     samples.float()
