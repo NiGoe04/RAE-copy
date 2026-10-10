@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--output-dir", default="lr_finder_results")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--image-size", type=int, default=256)
+    parser.add_argument("--image-size", type=int, default=128)
     parser.add_argument("--start-lr", type=float, default=1e-6)
     parser.add_argument("--end-lr", type=float, default=5e-4)
     parser.add_argument("--num-steps", type=int, default=200)
