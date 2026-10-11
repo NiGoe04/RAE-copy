@@ -38,7 +38,7 @@ transport:
     prediction: 'velocity'
     loss_weight: null
     time_dist_type: 'logit-normal_0_1'
-    velocity_loss_type: 'squared_l2' ##### THIS IS NEW !!!
+    velocity_loss_type: 'unsquared_l2' ##### THIS IS NEW !!!
 
 sampler:
   mode: ODE
