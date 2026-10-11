@@ -71,7 +71,7 @@ eval:
 training:
   epochs: 300
   #batch_size: 32
-  global_batch_size: 128
+  global_batch_size: 96
   grad_accum_steps: 1 # change according to your GPU memory
   ema_decay: 0.9995
   num_workers: 4
