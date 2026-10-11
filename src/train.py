@@ -50,6 +50,21 @@ from utils.dist_utils import *
 ##### Eval utils
 from eval import evaluate_generation_distributed
 
+def log_cuda_memory(logger, tag, device):
+    if not torch.cuda.is_available():
+        return
+
+    allocated = torch.cuda.memory_allocated(device) / 1024**3
+    reserved = torch.cuda.memory_reserved(device) / 1024**3
+    peak = torch.cuda.max_memory_allocated(device) / 1024**3
+
+    logger.info(
+        f"[CUDA memory {tag}] "
+        f"allocated={allocated:.2f} GB, "
+        f"reserved={reserved:.2f} GB, "
+        f"peak={peak:.2f} GB"
+    )
+
 def save_checkpoint(
     path: str,
     step: int,
@@ -477,6 +492,8 @@ def main():
             if global_step % sample_every == 0:
                 model.eval()
                 torch.cuda.empty_cache() # cleanup
+                torch.cuda.reset_peak_memory_stats(device)
+                log_cuda_memory(logger, "before_sampling", device)
                 logger.info("Generating EMA samples...")
                 with torch.no_grad():
                     n_visual = min(64, zs.shape[0], labels.shape[0]) # at most 64 samples
@@ -498,12 +515,16 @@ def main():
                 del samples
                 del zs_samples
                 del visual_sample_model_kwargs
+                log_cuda_memory(logger, "after_sampling", device)
                 torch.cuda.empty_cache()
+                log_cuda_memory(logger, "after_sampling_empty_cache", device)
                 model.train()
             if do_eval and (eval_interval > 0 and global_step % eval_interval == 0):
                 logger.info("Starting evaluation...")
                 model.eval()
                 torch.cuda.empty_cache() # cleanup
+                torch.cuda.reset_peak_memory_stats(device)
+                log_cuda_memory(logger, "before_eval", device)
                 eval_models = [(ema_model_fn, "ema")]
                 if eval_model:
                     eval_models.append((model_fn, "model"))
@@ -532,7 +553,9 @@ def main():
                         wandb_utils.log(eval_stats, step=global_step)
                     # cleanup before resuming training
                     del eval_stats
+                    log_cuda_memory(logger, "after_eval", device)
                     torch.cuda.empty_cache()
+                    log_cuda_memory(logger, "after_eval_empty_cache", device)
                     model.train()
                 logger.info("Evaluation done.")
             global_step += 1
