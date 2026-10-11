@@ -64,7 +64,7 @@ misc:
 eval:
   eval_interval: 100 # every 10 epochs
   eval_model: false
-  data_path: '/home/nigo00005/projects/datasets/imagenet_subset_dogs_cats_4_to_1/eval/dogs'
+  data_path: '/home/nigo00005/projects/datasets/imagenet_subset_dogs_cats_4_to_1/eval_dogs_only'
   reference_npz_path: '/home/nigo00005/projects/datasets/imagenet_subset_dogs_cats_4_to_1/dog_eval_stats.npz'
 
 
