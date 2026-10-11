@@ -43,8 +43,8 @@ transport:
 sampler:
   mode: ODE
   params:
-    sampling_method: 'dopri5'
-    num_steps: 80
+    sampling_method: 'euler'
+    num_steps: 100
     atol: 1.0e-6
     rtol: 1.0e-3
     reverse: false
