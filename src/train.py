@@ -454,7 +454,7 @@ def main():
                         running_grad_norm / max(running_optimization_steps, 1),
 
                     "optimization/gradient_clipped":
-                        bool(running_clipped > 0),
+                        int(running_clipped),
 
                     "optimization/clipping_rate":
                         running_clipped / max(running_optimization_steps, 1),
