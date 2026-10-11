@@ -62,7 +62,7 @@ misc:
   time_dist_shift_base: 4096
 
 eval:
-  eval_interval: 1200 # every 10 epochs
+  eval_interval: 3200 # every 10 epochs
   eval_model: false
   data_path: '/home/nigo00005/projects/datasets/imagenet_subset_dogs_cats_4_to_1/eval/dogs'
   reference_npz_path: '/home/nigo00005/projects/datasets/imagenet_subset_dogs_cats_4_to_1/dog_eval_stats.npz'
@@ -75,9 +75,9 @@ training:
   grad_accum_steps: 1 # change according to your GPU memory
   ema_decay: 0.9995
   num_workers: 4
-  log_interval: 100
+  log_interval: 50
   checkpoint_interval: 10
-  sample_every: 600 # approx every 5 epochs
+  sample_every: 1600 # approx every 5 epochs
   clip_grad: 1.0
   global_seed: 42
   optimizer:
