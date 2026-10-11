@@ -476,6 +476,7 @@ def main():
                 running_optimization_steps = 0
             if global_step % sample_every == 0:
                 model.eval()
+                torch.cuda.empty_cache() # cleanup
                 logger.info("Generating EMA samples...")
                 with torch.no_grad():
                     n_visual = min(64, zs.shape[0], labels.shape[0]) # at most 64 samples
@@ -493,10 +494,16 @@ def main():
                     if args.wandb and rank == 0:
                         wandb_utils.log_image(samples, global_step)
                 logger.info("Generating EMA samples done.")
+                # cleanup
+                del samples
+                del zs_samples
+                del visual_sample_model_kwargs
+                torch.cuda.empty_cache()
                 model.train()
             if do_eval and (eval_interval > 0 and global_step % eval_interval == 0):
                 logger.info("Starting evaluation...")
                 model.eval()
+                torch.cuda.empty_cache() # cleanup
                 eval_models = [(ema_model_fn, "ema")]
                 if eval_model:
                     eval_models.append((model_fn, "model"))
@@ -523,6 +530,9 @@ def main():
                     eval_stats = {f"eval_{mod_name}/{k}": v for k, v in eval_stats.items()} if eval_stats is not None else {}
                     if args.wandb:
                         wandb_utils.log(eval_stats, step=global_step)
+                    # cleanup before resuming training
+                    del eval_stats
+                    torch.cuda.empty_cache()
                     model.train()
                 logger.info("Evaluation done.")
             global_step += 1
