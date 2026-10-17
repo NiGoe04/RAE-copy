@@ -8,6 +8,8 @@ import torch.nn as nn
 import math
 from time import time
 import argparse
+import json
+from pathlib import Path
 from utils.model_utils import instantiate_from_config
 from stage2.transport import create_transport, Sampler
 from utils.train_utils import parse_configs
@@ -122,6 +124,24 @@ def main(args):
         f"max={winning_confidence.max().item():.4f}."
     )
 
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results = {
+        "config": str(Path(args.config)),
+        "seed": args.seed,
+        "num_samples": n,
+        "dogs": dog_count,
+        "cats": cat_count,
+        "dog_percentage": 100.0 * dog_count / total,
+        "cat_percentage": 100.0 * cat_count / total,
+        "mean_decision_confidence": winning_confidence.mean().item(),
+        "min_decision_confidence": winning_confidence.min().item(),
+        "max_decision_confidence": winning_confidence.max().item(),
+    }
+    with (output_dir / "classification_results.json").open("w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"Saved classification results to {output_dir / 'classification_results.json'}")
+
     # Save and display images:
     #save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(0, 1))
 
@@ -133,5 +153,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-samples", type=int, default=64,
                         help="Number of unconditional samples to generate.")
+    parser.add_argument("--output-dir", type=str, required=True,
+                        help="Directory in which to save the JSON results.")
     args = parser.parse_known_args()[0]
     main(args)
