@@ -68,17 +68,7 @@ def main(args):
     latent_size = misc.get("latent_size", (768, 16, 16))
     # This model is trained unconditionally (num_classes: 1). The model
     # interface still requires y, so use a dummy zero label for every sample.
-    n = args.num_samples
-    z = torch.randn(n, *latent_size, device=device)
-    y = torch.zeros(n, dtype=torch.long, device=device)
-    model_kwargs = dict(y=y)
     model_fwd = model.forward
-    # Sample images:
-    start_time = time()
-    samples: torch.Tensor = sample_fn(z, model_fwd, **model_kwargs)[-1]
-    # samples = vae.decode(samples / 0.18215).sample
-    samples = rae.decode(samples)
-    print(f"Sampling took {time() - start_time:.2f} seconds.")
 
     # Classify generated images with an ImageNet-1K pretrained classifier.
     # These are the standard 0-based ImageNet-1K indices for the 25 dog and
@@ -94,34 +84,63 @@ def main(args):
     classifier = convnext_base(weights=classifier_weights).to(device).eval()
     classifier_preprocess = classifier_weights.transforms()
 
-    # RAE reconstructions are intended for the [0, 1] image range. The
-    # decoder does not hard-bound its raw output, so clamp before preprocessing.
-    classifier_images = samples.float().clamp(0.0, 1.0)
-    classifier_images = torch.stack([
-        classifier_preprocess(image) for image in classifier_images
-    ])
-    with torch.no_grad():
-        logits = classifier(classifier_images)
-        dog_score = torch.logsumexp(logits[:, dog_indices], dim=1) - math.log(len(dog_indices))
-        cat_score = torch.logsumexp(logits[:, cat_indices], dim=1) - math.log(len(cat_indices))
-        class_scores = torch.stack([dog_score, cat_score], dim=1)
-        class_confidences = torch.softmax(class_scores, dim=1)
-        dog_confidence = class_confidences[:, 0]
-        cat_confidence = class_confidences[:, 1]
-        dog_mask = dog_confidence > cat_confidence
-        dog_count = int(dog_mask.sum().item())
-        cat_count = int((~dog_mask).sum().item())
-        winning_confidence = class_confidences.max(dim=1).values
+    # Keep the ODE trajectory, decoded images, and classifier inputs bounded
+    # by batch_size. odeint returns every requested time point, so sampling all
+    # requested images in one call can consume hundreds of GiB.
+    start_time = time()
+    dog_count = 0
+    cat_count = 0
+    confidence_sum = 0.0
+    min_confidence = float("inf")
+    max_confidence = float("-inf")
+    processed = 0
+    for start in range(0, args.num_samples, args.batch_size):
+        batch_n = min(args.batch_size, args.num_samples - start)
+        with torch.inference_mode():
+            z = torch.randn(batch_n, *latent_size, device=device)
+            y = torch.zeros(batch_n, dtype=torch.long, device=device)
+            latent_samples = sample_fn(z, model_fwd, y=y)[-1]
+            del z, y
 
+            # RAE reconstructions are intended for [0, 1]. Clamp before the
+            # classifier's standard ImageNet preprocessing.
+            samples = rae.decode(latent_samples).float().clamp(0.0, 1.0)
+            del latent_samples
+            classifier_images = torch.stack([
+                classifier_preprocess(image) for image in samples
+            ])
+            del samples
+            logits = classifier(classifier_images)
+            del classifier_images
+            dog_score = torch.logsumexp(logits[:, dog_indices], dim=1) - math.log(len(dog_indices))
+            cat_score = torch.logsumexp(logits[:, cat_indices], dim=1) - math.log(len(cat_indices))
+            del logits
+            class_confidences = torch.softmax(torch.stack([dog_score, cat_score], dim=1), dim=1)
+            dog_confidence = class_confidences[:, 0]
+            cat_confidence = class_confidences[:, 1]
+            winning_confidence = class_confidences.max(dim=1).values
+            batch_dog_count = int((dog_confidence > cat_confidence).sum().item())
+            dog_count += batch_dog_count
+            cat_count += batch_n - batch_dog_count
+            confidence_sum += winning_confidence.sum().item()
+            min_confidence = min(min_confidence, winning_confidence.min().item())
+            max_confidence = max(max_confidence, winning_confidence.max().item())
+            processed += batch_n
+        del class_confidences, dog_confidence, cat_confidence, winning_confidence
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        print(f"Processed {processed}/{args.num_samples} samples.")
+
+    print(f"Sampling and classification took {time() - start_time:.2f} seconds.")
     total = dog_count + cat_count
     print(
         f"Classifier results: dogs={dog_count}/{total} ({100.0 * dog_count / total:.2f}%), "
         f"cats={cat_count}/{total} ({100.0 * cat_count / total:.2f}%)."
     )
     print(
-        f"Decision confidence: mean={winning_confidence.mean().item():.4f}, "
-        f"min={winning_confidence.min().item():.4f}, "
-        f"max={winning_confidence.max().item():.4f}."
+        f"Decision confidence: mean={confidence_sum / total:.4f}, "
+        f"min={min_confidence:.4f}, "
+        f"max={max_confidence:.4f}."
     )
 
     output_dir = Path(args.output_dir)
@@ -129,14 +148,14 @@ def main(args):
     results = {
         "config": str(Path(args.config)),
         "seed": args.seed,
-        "num_samples": n,
+        "num_samples": args.num_samples,
         "dogs": dog_count,
         "cats": cat_count,
         "dog_percentage": 100.0 * dog_count / total,
         "cat_percentage": 100.0 * cat_count / total,
-        "mean_decision_confidence": winning_confidence.mean().item(),
-        "min_decision_confidence": winning_confidence.min().item(),
-        "max_decision_confidence": winning_confidence.max().item(),
+        "mean_decision_confidence": confidence_sum / total,
+        "min_decision_confidence": min_confidence,
+        "max_decision_confidence": max_confidence,
     }
     with (output_dir / "classification_results.json").open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
@@ -153,7 +172,13 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-samples", type=int, default=64,
                         help="Number of unconditional samples to generate.")
+    parser.add_argument("--batch-size", type=int, default=8,
+                        help="Number of images to sample and classify at a time.")
     parser.add_argument("--output-dir", type=str, required=True,
                         help="Directory in which to save the JSON results.")
     args = parser.parse_known_args()[0]
+    if args.num_samples <= 0:
+        parser.error("--num-samples must be positive")
+    if args.batch_size <= 0:
+        parser.error("--batch-size must be positive")
     main(args)
